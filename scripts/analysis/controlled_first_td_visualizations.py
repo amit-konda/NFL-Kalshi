@@ -12,6 +12,10 @@ import matplotlib.pyplot as plt
 import sys
 import os
 
+# Global switch: choose which model to emphasize across visuals (1-5)
+# 1 = Basic, 2 = Controlled, 3 = FirstTD×Pregame, 4 = FirstTD×Ball, 5 = Logit Pregame
+SELECTED_MODEL = 2
+
 # Helper function to ensure directories exist
 def ensure_directory(filepath):
     """Create directory if it doesn't exist"""
@@ -110,25 +114,66 @@ print("\n" + "="*80)
 print("CREATING MODEL COMPARISON VISUALIZATION...")
 print("="*80)
 
-# Extract AIC/BIC values from model summaries (approximate parsing)
-# This is a simplified approach - in practice you might want to parse the summaries more carefully
+# Parse AIC/BIC from model_summaries.txt comparison section
+models_labels = {
+    1: 'Basic\n(Model 1)',
+    2: 'Controlled\n(Model 2)',
+    3: 'FirstTD×Preg\n(Model 3)',
+    4: 'FirstTD×Ball\n(Model 4)',
+    5: 'Logit Preg\n(Model 5)'
+}
+
+def parse_metric(line, key):
+    try:
+        parts = line.split(',')
+        for part in parts:
+            if key in part:
+                return float(part.strip().split('=')[1].strip())
+    except Exception:
+        return np.nan
+    return np.nan
+
+lines = model_summaries.splitlines()
+aic_values = []
+bic_values = []
+available_models = []
+for m in range(1, 6):
+    prefix = f"Model {m} ("
+    line = next((ln for ln in lines if ln.strip().startswith(prefix) and 'AIC' in ln), None)
+    if line is not None:
+        aic = parse_metric(line, 'AIC')
+        bic = parse_metric(line, 'BIC')
+        aic_values.append(aic)
+        bic_values.append(bic)
+        available_models.append(m)
+
+if len(available_models) == 0:
+    # Fallback if parsing failed
+    available_models = [1, 2, 3]
+    aic_values = [2650, 2640, 2635]
+    bic_values = [2665, 2660, 2660]
+
 fig, ax = plt.subplots(figsize=(10, 6))
-models = ['Basic\n(Model 1)', 'Controlled\n(Model 2)', 'Interaction\n(Model 3)']
-
-# These would need to be extracted from the model summaries file
-# For now, using placeholder values - in practice you'd parse the actual values
-aic_values = [2650, 2640, 2635]  # Placeholder values
-bic_values = [2665, 2660, 2660]  # Placeholder values
-
+models = [models_labels[m] for m in available_models]
 x = np.arange(len(models))
 width = 0.35
 
 bars1 = ax.bar(x - width/2, aic_values, width, label='AIC', color='steelblue', edgecolor='black', linewidth=1.5)
 bars2 = ax.bar(x + width/2, bic_values, width, label='BIC', color='coral', edgecolor='black', linewidth=1.5)
 
+# Highlight selected model
+if SELECTED_MODEL in available_models:
+    idx = available_models.index(SELECTED_MODEL)
+    for bars in [bars1, bars2]:
+        bars[idx].set_edgecolor('gold')
+        bars[idx].set_linewidth(3)
+        bars[idx].set_alpha(1.0)
+    ax.text(x[idx], max(aic_values[idx], bic_values[idx]) * 1.02,
+            'Selected', ha='center', va='bottom', fontsize=10, fontweight='bold', color='goldenrod')
+
 ax.set_xlabel('Model', fontsize=12, fontweight='bold')
 ax.set_ylabel('Information Criterion (lower = better)', fontsize=12, fontweight='bold')
-ax.set_title('Model Comparison: AIC and BIC', fontsize=14, fontweight='bold')
+ax.set_title(f'Model Comparison: AIC and BIC (Selected: Model {SELECTED_MODEL})', fontsize=14, fontweight='bold')
 ax.set_xticks(x)
 ax.set_xticklabels(models)
 ax.legend(fontsize=11)

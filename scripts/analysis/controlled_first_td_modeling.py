@@ -17,6 +17,10 @@ from scipy.stats import pearsonr
 import sys
 import os
 
+# Resolve project paths relative to this script, regardless of CWD
+SCRIPT_DIR = os.path.dirname(__file__)
+PROJECT_ROOT = os.path.abspath(os.path.join(SCRIPT_DIR, '..', '..'))
+
 # Helper function to ensure directories exist
 def ensure_directory(filepath):
     """Create directory if it doesn't exist"""
@@ -51,10 +55,11 @@ print("="*80)
 print("\nLoading unified data...")
 
 try:
-    merged = pd.read_csv("../../results/data/nfl_unified_data.csv")
+    data_path = os.path.join(PROJECT_ROOT, "results", "data", "nfl_unified_data.csv")
+    merged = pd.read_csv(data_path)
 except FileNotFoundError:
     print("❌ ERROR: Data file not found!")
-    print("   Expected: results/data/nfl_unified_data.csv")
+    print("   Expected at repository root: results/data/nfl_unified_data.csv")
     print("   Please run: cd scripts/data && python3 generate_unified_data.py")
     sys.exit(1)
 except Exception as e:
@@ -83,14 +88,20 @@ if len(merged) < 100:
 print(f"✅ Loaded {len(merged)} games with complete data\n")
 
 # Create team-level dataset
-home_df = merged[["game_id", "season", "home_team", "home_prob", "first_td_team", "winner", "opening_possession_team"]].rename(
+home_cols = ["game_id", "season", "home_team", "home_prob", "first_td_team", "winner", "opening_possession_team"]
+if "first_td_game_seconds_remaining" in merged.columns:
+    home_cols.append("first_td_game_seconds_remaining")
+home_df = merged[home_cols].rename(
     columns={"home_team": "team", "home_prob": "pregame_prob"}
 )
 home_df["scored_first_td"] = (home_df["team"] == home_df["first_td_team"]).astype(int)
 home_df["won"] = (home_df["team"] == home_df["winner"]).astype(int)
 home_df["got_ball_first"] = (home_df["team"] == home_df["opening_possession_team"]).astype(int)
 
-away_df = merged[["game_id", "season", "away_team", "away_prob", "first_td_team", "winner", "opening_possession_team"]].rename(
+away_cols = ["game_id", "season", "away_team", "away_prob", "first_td_team", "winner", "opening_possession_team"]
+if "first_td_game_seconds_remaining" in merged.columns:
+    away_cols.append("first_td_game_seconds_remaining")
+away_df = merged[away_cols].rename(
     columns={"away_team": "team", "away_prob": "pregame_prob"}
 )
 away_df["scored_first_td"] = (away_df["team"] == away_df["first_td_team"]).astype(int)
@@ -99,6 +110,10 @@ away_df["got_ball_first"] = (away_df["team"] == away_df["opening_possession_team
 
 long_df = pd.concat([home_df, away_df], ignore_index=True).dropna(subset=["pregame_prob"])
 print(f"Created {len(long_df)} team-game observations\n")
+
+# Derive time-left at first TD in minutes if available
+if "first_td_game_seconds_remaining" in long_df.columns:
+    long_df["first_td_time_left"] = pd.to_numeric(long_df["first_td_game_seconds_remaining"], errors='coerce') / 60.0
 
 # --- Step 2: Logistic regression controlling for kickoff possession ---
 print("="*80)
@@ -144,10 +159,62 @@ except Exception as e:
     print(f"❌ ERROR: Failed to fit interaction model: {str(e)}")
     sys.exit(1)
 
+print("\n" + "="*80)
+print("MODEL 4: WITH INTERACTION TERM (scored_first_td × got_ball_first)")
+print("="*80)
+
+# Create interaction term between first TD and getting ball first
+long_df['first_td_x_ball'] = long_df['scored_first_td'] * long_df['got_ball_first']
+
+try:
+    X_interaction_ball = sm.add_constant(long_df[["pregame_prob", "scored_first_td",
+                                                  "got_ball_first", "first_td_x_ball"]])
+    model_interaction_ball = sm.Logit(y, X_interaction_ball).fit(disp=False)
+    print(model_interaction_ball.summary())
+except Exception as e:
+    print(f"❌ ERROR: Failed to fit interaction (first_td × got_ball_first) model: {str(e)}")
+    sys.exit(1)
+
+print("\n" + "="*80)
+print("MODEL 5: CONTROLLED WITH LOGIT(pregame_prob)")
+print("="*80)
+
+# Use logit transform of pregame probability (with clipping for numerical stability)
+try:
+    epsilon = 1e-6
+    pregame_clipped = long_df['pregame_prob'].clip(epsilon, 1 - epsilon)
+    long_df['pregame_logit'] = np.log(pregame_clipped / (1 - pregame_clipped))
+    X_logit_controlled = sm.add_constant(long_df[["pregame_logit", "scored_first_td", "got_ball_first"]])
+    model_logit_controlled = sm.Logit(y, X_logit_controlled).fit(disp=False)
+    print(model_logit_controlled.summary())
+except Exception as e:
+    print(f"❌ ERROR: Failed to fit logit-transformed pregame model: {str(e)}")
+    sys.exit(1)
+
+# --- Optional Model 6: Add time left at first TD to Model 2 ---
+print("\n" + "="*80)
+print("MODEL 6: CONTROLLED + Time Left at First TD (minutes)")
+print("="*80)
+
+model_timeleft_controlled = None
+try:
+    if "first_td_time_left" in long_df.columns and long_df["first_td_time_left"].notna().any():
+        df_m6 = long_df.dropna(subset=["first_td_time_left"]).copy()
+        X_timeleft = sm.add_constant(df_m6[["pregame_prob", "scored_first_td", "got_ball_first", "first_td_time_left"]])
+        y_m6 = df_m6["won"]
+        model_timeleft_controlled = sm.Logit(y_m6, X_timeleft).fit(disp=False)
+        print(model_timeleft_controlled.summary())
+    else:
+        print("⚠️  Skipping Model 6: 'first_td_time_left' not available in dataset.")
+except Exception as e:
+    print(f"❌ ERROR: Failed to fit Model 6 (Controlled + Time Left): {str(e)}")
+
 # Save model summaries to file
 print("\nSaving model summaries to file...")
 try:
-    with open('../../results/analysis/model_summaries.txt', 'w') as f:
+    summaries_path = os.path.join(PROJECT_ROOT, 'results', 'analysis', 'model_summaries.txt')
+    ensure_directory(summaries_path)
+    with open(summaries_path, 'w') as f:
         f.write("="*80 + "\n")
         f.write("NFL FIRST TD ANALYSIS - MODEL SUMMARIES\n")
         f.write("="*80 + "\n\n")
@@ -172,16 +239,41 @@ try:
         f.write(str(model_interaction.summary()) + "\n\n")
         
         f.write("="*80 + "\n")
-        f.write("MODEL COMPARISON (ALL THREE MODELS)\n")
+        f.write("MODEL 4: WITH INTERACTION TERM (scored_first_td × got_ball_first)\n")
+        f.write("="*80 + "\n")
+        f.write(str(model_interaction_ball.summary()) + "\n\n")
+
+        f.write("="*80 + "\n")
+        f.write("MODEL 5: CONTROLLED WITH LOGIT(pregame_prob)\n")
+        f.write("="*80 + "\n")
+        f.write(str(model_logit_controlled.summary()) + "\n\n")
+
+        # Model 6 summary (if available)
+        f.write("="*80 + "\n")
+        f.write("MODEL 6: CONTROLLED + Time Left at First TD (minutes)\n")
+        f.write("="*80 + "\n")
+        if 'first_td_time_left' in long_df.columns and model_timeleft_controlled is not None:
+            f.write(str(model_timeleft_controlled.summary()) + "\n\n")
+        else:
+            f.write("Model 6 skipped: 'first_td_time_left' not available or model could not be fit.\n\n")
+
+        f.write("="*80 + "\n")
+        f.write("MODEL COMPARISON (ALL FIVE MODELS)\n")
         f.write("="*80 + "\n")
         f.write(f"Model 1 (Basic):        AIC = {model_basic.aic:.2f}, BIC = {model_basic.bic:.2f}, Pseudo R² = {model_basic.prsquared:.4f}\n")
         f.write(f"Model 2 (Controlled):   AIC = {model_controlled.aic:.2f}, BIC = {model_controlled.bic:.2f}, Pseudo R² = {model_controlled.prsquared:.4f}\n")
-        f.write(f"Model 3 (Interaction):  AIC = {model_interaction.aic:.2f}, BIC = {model_interaction.bic:.2f}, Pseudo R² = {model_interaction.prsquared:.4f}\n\n")
-        f.write(f"Best Model (lowest AIC): {'Model 3' if model_interaction.aic < model_controlled.aic else 'Model 2'}\n")
-        f.write(f"Interaction Term Significant: {'Yes (p < 0.05)' if model_interaction.pvalues['first_td_x_pregame'] < 0.05 else 'No (p ≥ 0.05)'}\n")
-        f.write(f"Interaction Term p-value: {model_interaction.pvalues['first_td_x_pregame']:.4f}\n\n")
+        f.write(f"Model 3 (FirstTD×Preg): AIC = {model_interaction.aic:.2f}, BIC = {model_interaction.bic:.2f}, Pseudo R² = {model_interaction.prsquared:.4f}\n")
+        f.write(f"Model 4 (FirstTD×Ball): AIC = {model_interaction_ball.aic:.2f}, BIC = {model_interaction_ball.bic:.2f}, Pseudo R² = {model_interaction_ball.prsquared:.4f}\n")
+        f.write(f"Model 5 (Logit Pregame): AIC = {model_logit_controlled.aic:.2f}, BIC = {model_logit_controlled.bic:.2f}, Pseudo R² = {model_logit_controlled.prsquared:.4f}\n\n")
+        if 'first_td_time_left' in long_df.columns and model_timeleft_controlled is not None:
+            f.write(f"Model 6 (Controlled+Time): AIC = {model_timeleft_controlled.aic:.2f}, BIC = {model_timeleft_controlled.bic:.2f}, Pseudo R² = {model_timeleft_controlled.prsquared:.4f}\n\n")
+        f.write(f"Best Model (lowest AIC among 2 & 3 for visuals): {'Model 3' if model_interaction.aic < model_controlled.aic else 'Model 2'}\n")
+        f.write(f"Model 3 Interaction Significant: {'Yes (p < 0.05)' if model_interaction.pvalues['first_td_x_pregame'] < 0.05 else 'No (p ≥ 0.05)'}\n")
+        f.write(f"Model 3 Interaction p-value: {model_interaction.pvalues['first_td_x_pregame']:.4f}\n")
+        f.write(f"Model 4 Interaction Significant: {'Yes (p < 0.05)' if model_interaction_ball.pvalues['first_td_x_ball'] < 0.05 else 'No (p ≥ 0.05)'}\n")
+        f.write(f"Model 4 Interaction p-value: {model_interaction_ball.pvalues['first_td_x_ball']:.4f}\n\n")
         
-    print("✅ Saved model summaries to: results/analysis/model_summaries.txt")
+    print(f"✅ Saved model summaries to: {summaries_path}")
 except Exception as e:
     print(f"⚠️  WARNING: Could not save model summaries: {str(e)}")
 
@@ -596,21 +688,21 @@ print("\n" + "="*80)
 print("EXPORTING RESULTS...")
 print("="*80)
 
-safe_save_csv(tier_results_df, "../../results/analysis/controlled_first_td_results.csv", 
+safe_save_csv(tier_results_df, os.path.join(PROJECT_ROOT, "results", "analysis", "controlled_first_td_results.csv"), 
               'tier-specific correlation results')
 
-safe_save_csv(marginal_effects_df, "../../results/analysis/first_td_marginal_effects.csv", 
+safe_save_csv(marginal_effects_df, os.path.join(PROJECT_ROOT, "results", "analysis", "first_td_marginal_effects.csv"), 
               'marginal effects (5% intervals)')
 
 # Export 1% interval data
-safe_save_csv(marginal_effects_1pct_df, "../../results/analysis/first_td_marginal_effects_1pct.csv", 
+safe_save_csv(marginal_effects_1pct_df, os.path.join(PROJECT_ROOT, "results", "analysis", "first_td_marginal_effects_1pct.csv"), 
               'marginal effects (1% intervals)')
 
 # Export win probability data
-safe_save_csv(win_prob_df, "../../results/analysis/first_td_win_probabilities.csv", 
+safe_save_csv(win_prob_df, os.path.join(PROJECT_ROOT, "results", "analysis", "first_td_win_probabilities.csv"), 
               'win probability data (1% intervals)')
 
-safe_save_csv(win_prob_5pct_df, "../../results/analysis/first_td_win_probabilities_5pct.csv", 
+safe_save_csv(win_prob_5pct_df, os.path.join(PROJECT_ROOT, "results", "analysis", "first_td_win_probabilities_5pct.csv"), 
               'win probability data (5% intervals)')
 
 # Save interaction effects if significant
@@ -634,7 +726,7 @@ if model_interaction.pvalues['first_td_x_pregame'] < 0.05:
         })
     
     interaction_df = pd.DataFrame(interaction_effects)
-    safe_save_csv(interaction_df, "../../results/analysis/interaction_effects.csv", 
+    safe_save_csv(interaction_df, os.path.join(PROJECT_ROOT, "results", "analysis", "interaction_effects.csv"), 
                   'interaction effects data')
 
 print("\n" + "="*80)

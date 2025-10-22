@@ -6,6 +6,8 @@ Combines first TD analysis, pregame odds, and opening possession data.
 import pandas as pd
 import math
 import nfl_data_py as nfl
+import numpy as np
+import os
 
 print("="*80)
 print("GENERATING UNIFIED NFL DATASET (2020-2024)")
@@ -17,6 +19,41 @@ print("\nStep 1: Downloading play-by-play data...")
 pbp = nfl.import_pbp_data(years)
 print("Step 1: Downloading schedule data...")
 games = nfl.import_schedules(years)
+
+# --- Normalize/derive timing columns so downstream logic is robust ---
+# Create quarter_seconds_remaining from clock if missing, then game_seconds_remaining if missing
+def _parse_clock_to_seconds(clock_val):
+    if pd.isna(clock_val):
+        return np.nan
+    try:
+        if isinstance(clock_val, (int, float)):
+            # Already seconds
+            return float(clock_val)
+        s = str(clock_val)
+        if ':' in s:
+            minutes_str, seconds_str = s.split(':', 1)
+            minutes = int(minutes_str)
+            seconds = int(seconds_str)
+            return float(minutes * 60 + seconds)
+        # If format unexpected, return NaN
+        return np.nan
+    except Exception:
+        return np.nan
+
+if 'quarter_seconds_remaining' not in pbp.columns:
+    # Try deriving from clock
+    if 'clock' in pbp.columns:
+        pbp['quarter_seconds_remaining'] = pbp['clock'].apply(_parse_clock_to_seconds)
+    else:
+        pbp['quarter_seconds_remaining'] = np.nan
+
+if 'game_seconds_remaining' not in pbp.columns:
+    # Derive from qtr and quarter_seconds_remaining if available
+    qtr_numeric = pd.to_numeric(pbp.get('qtr', np.nan), errors='coerce')
+    qsr = pd.to_numeric(pbp.get('quarter_seconds_remaining', np.nan), errors='coerce')
+    # Assume 900s per quarter; OT quarters will produce negative remaining which still
+    # sorts later than regulation plays when sorting descending
+    pbp['game_seconds_remaining'] = (4 - qtr_numeric) * 900 + qsr
 
 # --- Step 2: Filter to regular-season games ---
 if 'season_type' in games.columns:
@@ -38,13 +75,39 @@ else:
     sort_cols = ['game_id']
     ascending = True
 
+# Determine which timing columns exist in this pbp dataset
+time_cols_possible = [
+    'game_seconds_remaining',
+    'game_seconds_elapsed',
+    'qtr',
+    'clock',
+    'quarter_seconds_remaining'
+]
+time_cols_existing = [c for c in time_cols_possible if c in pbp.columns]
+
+base_cols = ['game_id', 'td_team', 'td_player_name', 'play_type']
+select_cols = base_cols + time_cols_existing
+
+# Build a rename map only for columns that exist
+rename_map = {'td_team': 'first_td_team'}
+if 'game_seconds_remaining' in time_cols_existing:
+    rename_map['game_seconds_remaining'] = 'first_td_game_seconds_remaining'
+if 'game_seconds_elapsed' in time_cols_existing:
+    rename_map['game_seconds_elapsed'] = 'first_td_game_seconds_elapsed'
+if 'qtr' in time_cols_existing:
+    rename_map['qtr'] = 'first_td_qtr'
+if 'clock' in time_cols_existing:
+    rename_map['clock'] = 'first_td_clock'
+if 'quarter_seconds_remaining' in time_cols_existing:
+    rename_map['quarter_seconds_remaining'] = 'first_td_quarter_seconds_remaining'
+
 first_td = (
     pbp[td_mask]
     .sort_values(sort_cols, ascending=ascending)
     .groupby('game_id', as_index=False)
     .first()
-    [['game_id', 'td_team', 'td_player_name', 'play_type']]
-    .rename(columns={'td_team': 'first_td_team'})
+    [select_cols]
+    .rename(columns=rename_map)
 )
 
 print(f"Games with first TD identified: {len(first_td)}")
@@ -100,7 +163,8 @@ for game_id in games['game_id'].unique():
     if len(game_plays) == 0:
         continue
     
-    game_plays = game_plays.sort_values('game_seconds_remaining', ascending=False)
+    if 'game_seconds_remaining' in game_plays.columns:
+        game_plays = game_plays.sort_values('game_seconds_remaining', ascending=False)
     
     for _, play in game_plays.iterrows():
         if pd.notna(play.get('posteam')) and play.get('posteam') != '':
@@ -150,8 +214,16 @@ merged['favorite_won'] = (merged['favored_team'] == merged['winner']).astype(int
 merged['opening_possession_scored_first'] = (merged['opening_possession_team'] == merged['first_td_team']).astype(int)
 merged['opening_possession_won'] = (merged['opening_possession_team'] == merged['winner']).astype(int)
 
+# Derived readable time feature if available
+if 'first_td_game_seconds_remaining' in merged.columns:
+    merged['first_td_minutes_remaining'] = (merged['first_td_game_seconds_remaining'] / 60).round(2)
+
 # --- Step 9: Save unified dataset ---
-output_file = "../../results/data/nfl_unified_data.csv"
+# Resolve project root and prepare output directory
+SCRIPT_DIR = os.path.dirname(__file__)
+PROJECT_ROOT = os.path.abspath(os.path.join(SCRIPT_DIR, '..', '..'))
+output_file = os.path.join(PROJECT_ROOT, "results", "data", "nfl_unified_data.csv")
+os.makedirs(os.path.dirname(output_file), exist_ok=True)
 merged.to_csv(output_file, index=False)
 
 print("\n" + "="*80)

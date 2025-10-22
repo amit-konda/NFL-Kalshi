@@ -15,7 +15,7 @@ Dep. Variable:                    won   No. Observations:                 2660
 Model:                          Logit   Df Residuals:                     2657
 Method:                           MLE   Df Model:                            2
 Date:                Wed, 22 Oct 2025   Pseudo R-squ.:                  0.1967
-Time:                        03:29:53   Log-Likelihood:                -1481.1
+Time:                        04:41:39   Log-Likelihood:                -1481.1
 converged:                       True   LL-Null:                       -1843.8
 Covariance Type:            nonrobust   LLR p-value:                3.230e-158
 ===================================================================================
@@ -35,7 +35,7 @@ Dep. Variable:                    won   No. Observations:                 2660
 Model:                          Logit   Df Residuals:                     2656
 Method:                           MLE   Df Model:                            3
 Date:                Wed, 22 Oct 2025   Pseudo R-squ.:                  0.2009
-Time:                        03:29:53   Log-Likelihood:                -1473.4
+Time:                        04:41:39   Log-Likelihood:                -1473.4
 converged:                       True   LL-Null:                       -1843.8
 Covariance Type:            nonrobust   LLR p-value:                3.006e-160
 ===================================================================================
@@ -56,7 +56,7 @@ Dep. Variable:                    won   No. Observations:                 2660
 Model:                          Logit   Df Residuals:                     2655
 Method:                           MLE   Df Model:                            4
 Date:                Wed, 22 Oct 2025   Pseudo R-squ.:                  0.2009
-Time:                        03:29:53   Log-Likelihood:                -1473.4
+Time:                        04:41:39   Log-Likelihood:                -1473.4
 converged:                       True   LL-Null:                       -1843.8
 Covariance Type:            nonrobust   LLR p-value:                5.131e-159
 ======================================================================================
@@ -70,13 +70,84 @@ first_td_x_pregame     0.0163      0.508      0.032      0.974      -0.979      
 ======================================================================================
 
 ================================================================================
-MODEL COMPARISON (ALL THREE MODELS)
+MODEL 4: WITH INTERACTION TERM (scored_first_td × got_ball_first)
+================================================================================
+                           Logit Regression Results                           
+==============================================================================
+Dep. Variable:                    won   No. Observations:                 2660
+Model:                          Logit   Df Residuals:                     2655
+Method:                           MLE   Df Model:                            4
+Date:                Wed, 22 Oct 2025   Pseudo R-squ.:                  0.2009
+Time:                        04:41:39   Log-Likelihood:                -1473.4
+converged:                       True   LL-Null:                       -1843.8
+Covariance Type:            nonrobust   LLR p-value:                5.133e-159
+===================================================================================
+                      coef    std err          z      P>|z|      [0.025      0.975]
+-----------------------------------------------------------------------------------
+const              -2.8448      0.157    -18.113      0.000      -3.153      -2.537
+pregame_prob        4.4351      0.254     17.475      0.000       3.938       4.933
+scored_first_td     1.4638      0.129     11.310      0.000       1.210       1.718
+got_ball_first     -0.3583      0.129     -2.770      0.006      -0.612      -0.105
+first_td_x_ball    -0.0007      0.183     -0.004      0.997      -0.359       0.358
+===================================================================================
+
+================================================================================
+MODEL 5: CONTROLLED WITH LOGIT(pregame_prob)
+================================================================================
+                           Logit Regression Results                           
+==============================================================================
+Dep. Variable:                    won   No. Observations:                 2660
+Model:                          Logit   Df Residuals:                     2656
+Method:                           MLE   Df Model:                            3
+Date:                Wed, 22 Oct 2025   Pseudo R-squ.:                  0.2016
+Time:                        04:41:39   Log-Likelihood:                -1472.1
+converged:                       True   LL-Null:                       -1843.8
+Covariance Type:            nonrobust   LLR p-value:                8.527e-161
+===================================================================================
+                      coef    std err          z      P>|z|      [0.025      0.975]
+-----------------------------------------------------------------------------------
+const              -0.6294      0.074     -8.528      0.000      -0.774      -0.485
+pregame_logit       0.9841      0.057     17.218      0.000       0.872       1.096
+scored_first_td     1.4596      0.092     15.944      0.000       1.280       1.639
+got_ball_first     -0.3580      0.091     -3.914      0.000      -0.537      -0.179
+===================================================================================
+
+================================================================================
+MODEL 6: CONTROLLED + Time Left at First TD (minutes)
+================================================================================
+                           Logit Regression Results                           
+==============================================================================
+Dep. Variable:                    won   No. Observations:                 2660
+Model:                          Logit   Df Residuals:                     2655
+Method:                           MLE   Df Model:                            4
+Date:                Wed, 22 Oct 2025   Pseudo R-squ.:                  0.2009
+Time:                        04:41:39   Log-Likelihood:                -1473.4
+converged:                       True   LL-Null:                       -1843.8
+Covariance Type:            nonrobust   LLR p-value:                5.133e-159
+======================================================================================
+                         coef    std err          z      P>|z|      [0.025      0.975]
+--------------------------------------------------------------------------------------
+const                 -2.8472      0.268    -10.629      0.000      -3.372      -2.322
+pregame_prob           4.4351      0.254     17.475      0.000       3.938       4.933
+scored_first_td        1.4635      0.092     15.982      0.000       1.284       1.643
+got_ball_first        -0.3587      0.091     -3.921      0.000      -0.538      -0.179
+first_td_time_left  5.353e-05      0.005      0.012      0.991      -0.009       0.009
+======================================================================================
+
+================================================================================
+MODEL COMPARISON (ALL FIVE MODELS)
 ================================================================================
 Model 1 (Basic):        AIC = 2968.27, BIC = 2985.93, Pseudo R² = 0.1967
 Model 2 (Controlled):   AIC = 2954.76, BIC = 2978.30, Pseudo R² = 0.2009
-Model 3 (Interaction):  AIC = 2956.76, BIC = 2986.19, Pseudo R² = 0.2009
+Model 3 (FirstTD×Preg): AIC = 2956.76, BIC = 2986.19, Pseudo R² = 0.2009
+Model 4 (FirstTD×Ball): AIC = 2956.76, BIC = 2986.19, Pseudo R² = 0.2009
+Model 5 (Logit Pregame): AIC = 2952.23, BIC = 2975.78, Pseudo R² = 0.2016
 
-Best Model (lowest AIC): Model 2
-Interaction Term Significant: No (p ≥ 0.05)
-Interaction Term p-value: 0.9744
+Model 6 (Controlled+Time): AIC = 2956.76, BIC = 2986.19, Pseudo R² = 0.2009
+
+Best Model (lowest AIC among 2 & 3 for visuals): Model 2
+Model 3 Interaction Significant: No (p ≥ 0.05)
+Model 3 Interaction p-value: 0.9744
+Model 4 Interaction Significant: No (p ≥ 0.05)
+Model 4 Interaction p-value: 0.9969
 
