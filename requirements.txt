@@ -6,4 +6,7 @@ statsmodels>=0.14.1
 streamlit>=1.40.1
 pillow>=10.4.0
 nfl_data_py>=0.3.3
+requests>=2.31.0
+cryptography>=3.4.8
+kalshi-python>=2.0.0
 
