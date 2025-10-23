@@ -371,15 +371,15 @@ class KalshiAPIOfficial:
                 print(f"    No markets found for event")
                 return []
             
-                # Filter for game winner markets
-                game_markets = []
+            # Filter for game winner markets
+            game_markets = []
             for market in markets:
-                    if self._is_game_winner_market(market, home_team, away_team):
-                        game_markets.append(market)
-                
-                if game_markets:
+                if self._is_game_winner_market(market, home_team, away_team):
+                    game_markets.append(market)
+            
+            if game_markets:
                 print(f"    Found {len(game_markets)} matching markets")
-                    return game_markets
+                return game_markets
             else:
                 print(f"    No game winner markets found for {home_team} vs {away_team}")
                 return []
