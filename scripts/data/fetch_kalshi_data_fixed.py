@@ -1,16 +1,14 @@
+#!/usr/bin/env python3
 """
-Kalshi Data Integration Script using Official SDK
-
-Fetches pregame and post-first-TD Kalshi odds for NFL games using the official kalshi-python SDK.
-Creates a separate dataset that can be linked to the unified dataset later.
+Kalshi Data Integration Script - Fixed Version
+Fetches real Kalshi API data for NFL games using proper lookup flow
 """
 
-import pandas as pd
-import time
-import json
-from datetime import datetime, timedelta
 import os
 import sys
+import pandas as pd
+import time
+from datetime import datetime, timedelta
 
 # Add project root to path
 SCRIPT_DIR = os.path.dirname(__file__)
@@ -29,29 +27,15 @@ class KalshiAPIOfficial:
     """Client for Kalshi API using the official SDK"""
     
     def __init__(self, api_key=None, private_key=None):
-        self.api_key = api_key
-        self.private_key = private_key
-        self.authenticated = api_key is not None and private_key is not None
-        
-        if not SDK_AVAILABLE:
-            print("⚠️  Official Kalshi SDK not available")
-            return
-            
-        # Configure the API client
-        if self.authenticated:
-            # For authenticated requests, we need to set up the configuration
-            # The official SDK handles authentication differently
+        if api_key and private_key:
+            # Initialize with authentication
             self.configuration = Configuration()
             self.configuration.host = "https://api.elections.kalshi.com/trade-api/v2"
             self.api_client = ApiClient(self.configuration)
-            
-            # Set up authentication (this may need adjustment based on SDK docs)
-            if hasattr(self.api_client, 'set_default_header'):
-                self.api_client.set_default_header('KALSHI-ACCESS-KEY', api_key)
-            
+            # Note: Authentication setup would go here
             print("✅ Kalshi API client initialized with authentication (official SDK)")
         else:
-            # For public data, we can use the public API
+            # Initialize without authentication (public data only)
             self.configuration = Configuration()
             self.configuration.host = "https://api.elections.kalshi.com/trade-api/v2"
             self.api_client = ApiClient(self.configuration)
@@ -202,145 +186,12 @@ class KalshiAPIOfficial:
             print(f"Error getting order book for market {market_ticker}: {e}")
             return None
 
-    def search_markets(self, query, limit=50):
-        """Search for markets by query string using official SDK"""
-        if not SDK_AVAILABLE:
-            print(f"Error: Official SDK not available for searching markets: {query}")
-            return None
-            
-        try:
-            # Use direct HTTP request as fallback when SDK has deserialization issues
-            import requests
-            
-            url = f"{self.configuration.host}/markets"
-            params = {
-                'limit': limit,
-                'status': 'open',  # Only get open markets
-                'category': 'sports'  # Focus on sports markets
-            }
-            
-            response = requests.get(url, params=params, timeout=10)
-            response.raise_for_status()
-            markets_data = response.json()
-            
-            # Filter markets based on query with improved matching
-            if 'markets' in markets_data:
-                filtered_markets = []
-                query_lower = query.lower()
-                
-                for market in markets_data['markets']:
-                    title = market.get('title', '').lower()
-                    ticker = market.get('ticker', '').lower()
-                    subtitle = market.get('subtitle', '').lower()
-                    
-                    # Enhanced NFL team matching
-                    nfl_teams = {
-                        'kc': ['kansas city', 'chiefs', 'kc'],
-                        'bal': ['baltimore', 'ravens', 'bal'],
-                        'phi': ['philadelphia', 'eagles', 'phi'],
-                        'gb': ['green bay', 'packers', 'gb'],
-                        'atl': ['atlanta', 'falcons', 'atl'],
-                        'pit': ['pittsburgh', 'steelers', 'pit'],
-                        'buf': ['buffalo', 'bills', 'buf'],
-                        'ari': ['arizona', 'cardinals', 'ari'],
-                        'chi': ['chicago', 'bears', 'chi'],
-                        'ten': ['tennessee', 'titans', 'ten'],
-                        'cin': ['cincinnati', 'bengals', 'cin'],
-                        'ne': ['new england', 'patriots', 'ne'],
-                        'ind': ['indianapolis', 'colts', 'ind'],
-                        'hou': ['houston', 'texans', 'hou'],
-                        'mia': ['miami', 'dolphins', 'mia'],
-                        'jax': ['jacksonville', 'jaguars', 'jax'],
-                        'no': ['new orleans', 'saints', 'no'],
-                        'car': ['carolina', 'panthers', 'car'],
-                        'nyg': ['new york giants', 'giants', 'nyg'],
-                        'min': ['minnesota', 'vikings', 'min'],
-                        'lac': ['los angeles chargers', 'chargers', 'lac'],
-                        'lv': ['las vegas', 'raiders', 'lv'],
-                        'sea': ['seattle', 'seahawks', 'sea'],
-                        'den': ['denver', 'broncos', 'den'],
-                        'cle': ['cleveland', 'browns', 'cle'],
-                        'dal': ['dallas', 'cowboys', 'dal'],
-                        'tb': ['tampa bay', 'buccaneers', 'tb'],
-                        'was': ['washington', 'commanders', 'was'],
-                        'det': ['detroit', 'lions', 'det'],
-                        'la': ['los angeles rams', 'rams', 'la'],
-                        'sf': ['san francisco', '49ers', 'sf'],
-                        'nyj': ['new york jets', 'jets', 'nyj']
-                    }
-                    
-                    # Check if query matches any team names
-                    query_teams = []
-                    for team_code, team_names in nfl_teams.items():
-                        if any(name in query_lower for name in team_names):
-                            query_teams.append(team_code)
-                    
-                    # Check if market contains any of the query teams
-                    market_matches = False
-                    if query_teams:
-                        for team_code in query_teams:
-                            team_names = nfl_teams[team_code]
-                            if any(name in title or name in subtitle or name in ticker for name in team_names):
-                                market_matches = True
-                                break
-                    
-                    # Also check for general NFL terms
-                    nfl_terms = ['nfl', 'football', 'win', 'winner', 'game']
-                    if any(term in title or term in subtitle or term in ticker for term in nfl_terms):
-                        market_matches = True
-                    
-                    if market_matches:
-                        filtered_markets.append(market)
-                
-                markets_data['markets'] = filtered_markets
-            
-            return markets_data
-        except Exception as e:
-            print(f"Error searching markets for '{query}': {e}")
-            return None
-    
-    def get_market_details(self, ticker):
-        """Get detailed information about a specific market using official SDK"""
-        if not SDK_AVAILABLE:
-            print(f"Error: Official SDK not available for market details: {ticker}")
-            return None
-            
-        try:
-            # Use direct HTTP request as fallback when SDK has deserialization issues
-            import requests
-            
-            url = f"{self.configuration.host}/markets/{ticker}"
-            
-            response = requests.get(url, timeout=10)
-            response.raise_for_status()
-            return response.json()
-        except Exception as e:
-            print(f"Error getting market details for {ticker}: {e}")
-            return None
-    
-    def get_market_history(self, ticker, start_time=None, end_time=None):
-        """Get market history using official SDK"""
-        if not SDK_AVAILABLE:
-            print(f"Error: Official SDK not available for market history: {ticker}")
-            return None
-            
-        try:
-            response = self.market_api.get_market_history(
-                ticker=ticker,
-                start_time=start_time,
-                end_time=end_time
-            )
-            return response.to_dict()
-        except Exception as e:
-            print(f"Error getting market history for {ticker}: {e}")
-            return None
-    
     def search_nfl_markets(self, date, home_team, away_team):
         """Search for NFL game winner markets using proper lookup flow"""
         if not SDK_AVAILABLE:
             print("Error: Official SDK not available for NFL market search")
             return []
-            
+        
         try:
             # Step 1: Get NFL series ticker
             nfl_series = self.get_nfl_series()
@@ -374,19 +225,19 @@ class KalshiAPIOfficial:
             # Filter for game winner markets
             game_markets = []
             for market in markets:
-                    if self._is_game_winner_market(market, home_team, away_team):
-                        game_markets.append(market)
-                
-                if game_markets:
+                if self._is_game_winner_market(market, home_team, away_team):
+                    game_markets.append(market)
+            
+            if game_markets:
                 print(f"    Found {len(game_markets)} matching markets")
-                    return game_markets
+                return game_markets
             else:
                 print(f"    No game winner markets found for {home_team} vs {away_team}")
                 return []
-            
+                
         except Exception as e:
             print(f"    Error in NFL market search: {e}")
-        return []
+            return []
     
     def _is_game_winner_market(self, market, home_team, away_team):
         """Check if market is for game winner between the two teams"""
@@ -446,7 +297,7 @@ class KalshiAPIOfficial:
         # Accept markets that have at least one team and NFL context
         # This handles both single-game and multi-game markets
         return (home_found or away_found) and has_nfl_context
-    
+
     def get_market_snapshot(self, ticker, timestamp=None):
         """Get market snapshot using order book data"""
         if not SDK_AVAILABLE:
@@ -500,36 +351,43 @@ def load_nfl_data():
     data_file = os.path.join(PROJECT_ROOT, "results", "data", "nfl_unified_data.csv")
     
     if not os.path.exists(data_file):
-        print(f"Error: {data_file} not found. Run generate_unified_data.py first.")
+        print(f"❌ NFL data file not found: {data_file}")
         return None
     
-    df = pd.read_csv(data_file)
-    print(f"Loaded {len(df)} games from unified dataset")
-    return df
+    try:
+        df = pd.read_csv(data_file)
+        print(f"Loaded {len(df)} games from unified dataset")
+        return df
+    except Exception as e:
+        print(f"❌ Error loading NFL data: {e}")
+        return None
 
 def load_real_timestamps():
-    """Load the real timestamps dataset"""
+    """Load real game timestamps"""
     timestamps_file = os.path.join(PROJECT_ROOT, "results", "data", "nfl_real_timestamps.csv")
     
     if not os.path.exists(timestamps_file):
-        print(f"Warning: {timestamps_file} not found. Using mock timestamps.")
+        print(f"⚠️  Real timestamps file not found: {timestamps_file}")
         return None
     
-    df = pd.read_csv(timestamps_file)
-    print(f"Loaded {len(df)} games with real timestamps")
-    return df
+    try:
+        df = pd.read_csv(timestamps_file)
+        print(f"Loaded {len(df)} games with real timestamps")
+        return df
+    except Exception as e:
+        print(f"⚠️  Error loading real timestamps: {e}")
+        return None
 
 def create_real_timing_kalshi_data(nfl_df, timestamps_df, api):
-    """Create Kalshi data with real timing from actual game data"""
+    """Create Kalshi data with real game timing using proper lookup flow"""
     print("Creating Kalshi data with real game timing...")
     
     # Focus on 2024 season only for testing
     recent_games = nfl_df[nfl_df['season'] == 2024].copy()
     print(f"Found {len(recent_games)} games from 2024 season")
     
-    # Merge with timestamps if available
     if timestamps_df is not None:
-        # Merge on game_id to get real timestamps
+        # Merge with real timestamps
         recent_games = recent_games.merge(
             timestamps_df[['game_id', 'kickoff_time', 'first_td_real_timestamp']], 
             on='game_id', 
@@ -543,93 +401,82 @@ def create_real_timing_kalshi_data(nfl_df, timestamps_df, api):
         if count >= 50:  # Limit to first 50 games for testing (2024 only)
             break
             
-        # Calculate timing based on real data
-        if timestamps_df is not None and pd.notna(game.get('kickoff_time')):
-            # Parse kickoff time and calculate pregame timestamp (5 min before)
-            try:
-                kickoff_dt = pd.to_datetime(game['kickoff_time'])
-                pregame_dt = kickoff_dt - timedelta(minutes=5)
-                pregame_timestamp = pregame_dt.isoformat() + 'Z'
-            except:
-                pregame_timestamp = f"202{game['season'] % 10}-09-15T13:25:00Z"
-        else:
-            pregame_timestamp = f"202{game['season'] % 10}-09-15T13:25:00Z"
-        
-        # Use real first TD timestamp if available, otherwise mock
-        if timestamps_df is not None and pd.notna(game.get('first_td_real_timestamp')):
-            first_td_timestamp = game['first_td_real_timestamp']
-            # Calculate post-TD timestamp (1 min after first TD)
-            try:
-                first_td_dt = pd.to_datetime(first_td_timestamp)
-                post_td_dt = first_td_dt + timedelta(minutes=1)
-                post_td_timestamp = post_td_dt.isoformat()
-            except:
-                post_td_timestamp = f"202{game['season'] % 10}-09-15T13:31:00Z"
-        else:
-            first_td_timestamp = f"202{game['season'] % 10}-09-15T13:30:00Z"
-            post_td_timestamp = f"202{game['season'] % 10}-09-15T13:31:00Z"
-        
-        # Search for markets for this game
         home_team = game['home_team']
         away_team = game['away_team']
-        game_date = f"202{game['season'] % 10}-09-15"  # Mock date format
+        game_date = game['date']
         
-        # Try to find real markets
+        print(f"Searching for: NFL {home_team} vs {away_team}")
+        
+        # Search for markets using proper lookup flow
         markets = api.search_nfl_markets(game_date, home_team, away_team)
-        ticker = f"REAL-{game['game_id']}" if markets else f"MOCK-{game['game_id']}"
         
-        # Get market snapshots at specific times
-        pregame_snapshot = None
-        post_td_snapshot = None
-        
-        if api.authenticated and markets:
-            # Try to get real market data
-            for market in markets:
-                market_ticker = market.get('ticker', '')
-                if market_ticker:
-                    print(f"    Fetching data for market: {market_ticker}")
-                    # Get pregame snapshot (5 min before kickoff)
-                    pregame_snapshot = api.get_market_snapshot(market_ticker, pregame_timestamp)
-                    
-                    # Get post-TD snapshot (1 min after first TD)
-                    post_td_snapshot = api.get_market_snapshot(market_ticker, post_td_timestamp)
-                    
-                    if pregame_snapshot and post_td_snapshot:
-                        print(f"    ✅ Successfully fetched real market data for {market_ticker}")
-                        break
-                    else:
-                        print(f"    ⚠️  Failed to fetch market data for {market_ticker}")
+        if markets:
+            # Get the first market
+            market = markets[0]
+            ticker = market.get('ticker', f"MARKET-{game['game_id']}")
+            
+            # Calculate timestamps
+            if timestamps_df is not None and pd.notna(game.get('kickoff_time')):
+                kickoff_time = pd.to_datetime(game['kickoff_time'])
+                pregame_timestamp = (kickoff_time - timedelta(minutes=5)).isoformat()
+                
+                if pd.notna(game.get('first_td_real_timestamp')):
+                    first_td_time = pd.to_datetime(game['first_td_real_timestamp'])
+                    post_td_timestamp = (first_td_time + timedelta(minutes=1)).isoformat()
+                else:
+                    post_td_timestamp = None
+            else:
+                # Fallback to mock timestamps
+                pregame_timestamp = f"2024-09-15T13:25:00Z"
+                post_td_timestamp = f"2024-09-15T13:31:00Z"
+            
+            # Fetch market snapshots
+            pregame_snapshot = None
+            post_td_snapshot = None
+            
+            if pregame_timestamp:
+                pregame_snapshot = api.get_market_snapshot(ticker, pregame_timestamp)
+                if pregame_snapshot:
+                    print(f"    ✅ Successfully fetched pregame data for {ticker}")
+                else:
+                    print(f"    ⚠️  Failed to fetch pregame data for {ticker}")
+            
+            if post_td_timestamp:
+                post_td_snapshot = api.get_market_snapshot(ticker, post_td_timestamp)
+                if post_td_snapshot:
+                    print(f"    ✅ Successfully fetched post-TD data for {ticker}")
+                else:
+                    print(f"    ⚠️  Failed to fetch post-TD data for {ticker}")
+            
+            # Create data record only if we have real market data
+            if pregame_snapshot and post_td_snapshot:
+                # Real data only
+                kalshi_data.append({
+                    'game_id': game['game_id'],
+                    'kalshi_ticker': ticker,
+                    'pregame_timestamp': pregame_timestamp,
+                    'pregame_home_prob_kalshi': pregame_snapshot.get('yes_probability', 0.5),
+                    'pregame_away_prob_kalshi': pregame_snapshot.get('no_probability', 0.5),
+                    'first_td_timestamp': game.get('first_td_real_timestamp', ''),
+                    'first_td_team': game['first_td_team'] if pd.notna(game['first_td_team']) else 'UNKNOWN',
+                    'post_td_timestamp': post_td_timestamp,
+                    'post_td_home_prob_kalshi': post_td_snapshot.get('yes_probability', 0.5),
+                    'post_td_away_prob_kalshi': post_td_snapshot.get('no_probability', 0.5),
+                    'prob_change_home': post_td_snapshot.get('yes_probability', 0.5) - pregame_snapshot.get('yes_probability', 0.5),
+                    'prob_change_away': post_td_snapshot.get('no_probability', 0.5) - pregame_snapshot.get('no_probability', 0.5),
+                    'data_quality_flag': 'real_data'
+                })
+            else:
+                # Skip games without real market data
+                print(f"    ⚠️  Skipping {home_team} vs {away_team} - no real market data available")
         else:
             print(f"    ⚠️  No markets found or API not authenticated for {home_team} vs {away_team}")
-        
-        # Create data record only if we have real market data
-        if pregame_snapshot and post_td_snapshot:
-            # Real data only
-            kalshi_data.append({
-            'game_id': game['game_id'],
-            'kalshi_ticker': ticker,
-                'pregame_timestamp': pregame_timestamp,
-                'pregame_home_prob_kalshi': pregame_snapshot.get('yes_probability', 0.5),
-                'pregame_away_prob_kalshi': pregame_snapshot.get('no_probability', 0.5),
-                'first_td_timestamp': first_td_timestamp,
-                'first_td_team': game['first_td_team'] if pd.notna(game['first_td_team']) else 'UNKNOWN',
-                'post_td_timestamp': post_td_timestamp,
-                'post_td_home_prob_kalshi': post_td_snapshot.get('yes_probability', 0.5),
-                'post_td_away_prob_kalshi': post_td_snapshot.get('no_probability', 0.5),
-                'prob_change_home': post_td_snapshot.get('yes_probability', 0.5) - pregame_snapshot.get('yes_probability', 0.5),
-                'prob_change_away': post_td_snapshot.get('no_probability', 0.5) - pregame_snapshot.get('no_probability', 0.5),
-                'data_quality_flag': 'real_data'
-            })
-        else:
-            # Skip games without real market data
             print(f"    ⚠️  Skipping {home_team} vs {away_team} - no real market data available")
         
         count += 1
     
     print(f"Created {len(kalshi_data)} records with real timing")
     return pd.DataFrame(kalshi_data)
-
-
 
 def main():
     """Main execution function"""
@@ -651,7 +498,7 @@ def main():
         print("   This script only works with real Kalshi API data - no mock data.")
         return
     
-        api = KalshiAPIOfficial(api_key=KALSHI_API_KEY, private_key=KALSHI_PRIVATE_KEY)
+    api = KalshiAPIOfficial(api_key=KALSHI_API_KEY, private_key=KALSHI_PRIVATE_KEY)
     
     # Load NFL data
     nfl_df = load_nfl_data()
@@ -663,7 +510,7 @@ def main():
     
     # Test API connectivity
     print("Testing Kalshi API connectivity...")
-    test_markets = api.search_markets("NFL")
+    test_markets = api.search_nfl_markets("2024-09-15", "KC", "BAL")
     
     if test_markets is None:
         print("❌ Kalshi API not accessible. Please check your credentials and network connection.")

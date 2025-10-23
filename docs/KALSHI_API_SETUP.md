@@ -168,15 +168,13 @@ The script will automatically detect your configuration and use the appropriate 
 
 Once you have API access:
 
-1. **Run the full pipeline:**
+1. **Run the data fetch:**
    ```bash
    python3 run_kalshi_fetch.py    # Fetch Kalshi data
-   python3 run_kalshi_merge.py    # Merge with NFL data
-   python3 run_kalshi_analysis.py # Analyze results
    ```
 
 2. **Explore the results:**
-   - Check `results/data/nfl_unified_with_kalshi.csv`
+   - Check `results/data/kalshi_nfl_data.csv`
    - View generated visualizations in `visualizations/`
    - Run the dashboard: `streamlit run dashboard.py`
 
