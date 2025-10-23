@@ -371,8 +371,8 @@ class KalshiAPIOfficial:
                 print(f"    No markets found for event")
                 return []
             
-            # Filter for game winner markets
-            game_markets = []
+                # Filter for game winner markets
+                game_markets = []
             for market in markets:
                     if self._is_game_winner_market(market, home_team, away_team):
                         game_markets.append(market)
@@ -520,111 +520,112 @@ def load_real_timestamps():
     return df
 
 def create_real_timing_kalshi_data(nfl_df, timestamps_df, api):
-    """Create Kalshi data with real timing from actual game data"""
+    """Create Kalshi data with real timing using real timestamps dataset as primary source"""
     print("Creating Kalshi data with real game timing...")
     
-    # Focus on 2024 season only for testing
-    recent_games = nfl_df[nfl_df['season'] == 2024].copy()
-    print(f"Found {len(recent_games)} games from 2024 season")
+    if timestamps_df is None:
+        print("❌ No timestamps data available")
+        return pd.DataFrame()
     
-    # Merge with timestamps if available
-    if timestamps_df is not None:
-        # Merge on game_id to get real timestamps
-        recent_games = recent_games.merge(
-            timestamps_df[['game_id', 'kickoff_time', 'first_td_real_timestamp']], 
-            on='game_id', 
-            how='left'
-        )
+    # Use the real timestamps dataset as the primary source
+    # This ensures we create an entry for each game in the timestamps dataset
+    print(f"Processing {len(timestamps_df)} games from real timestamps dataset")
+    
+    # Merge with NFL data to get additional game information
+    games_to_process = timestamps_df.merge(
+        nfl_df[['game_id', 'first_td_team']], 
+        on='game_id', 
+        how='left'
+    )
+    
+    print(f"Found {len(games_to_process)} games with complete data")
     
     kalshi_data = []
     count = 0
+    total_games = len(games_to_process)
     
-    for idx, game in recent_games.iterrows():
-        if count >= 50:  # Limit to first 50 games for testing (2024 only)
-            break
+    for idx, game in games_to_process.iterrows():
+        count += 1
+        print(f"\n[{count}/{total_games}] Processing {game['game_id']}: {game['away_team']} @ {game['home_team']}")
             
-        # Calculate timing based on real data
-        if timestamps_df is not None and pd.notna(game.get('kickoff_time')):
-            # Parse kickoff time and calculate pregame timestamp (5 min before)
-            try:
-                kickoff_dt = pd.to_datetime(game['kickoff_time'])
-                pregame_dt = kickoff_dt - timedelta(minutes=5)
-                pregame_timestamp = pregame_dt.isoformat() + 'Z'
-            except:
-                pregame_timestamp = f"202{game['season'] % 10}-09-15T13:25:00Z"
-        else:
-            pregame_timestamp = f"202{game['season'] % 10}-09-15T13:25:00Z"
+        # Calculate timing based on real data from timestamps dataset
+        # Parse kickoff time and calculate pregame timestamp (5 min before)
+        try:
+            kickoff_dt = pd.to_datetime(game['kickoff_time'])
+            pregame_dt = kickoff_dt - timedelta(minutes=5)
+            pregame_timestamp = pregame_dt.isoformat() + 'Z'
+        except Exception as e:
+            print(f"    ⚠️  Error parsing kickoff time: {e}")
+            pregame_timestamp = None
         
-        # Use real first TD timestamp if available, otherwise mock
-        if timestamps_df is not None and pd.notna(game.get('first_td_real_timestamp')):
-            first_td_timestamp = game['first_td_real_timestamp']
-            # Calculate post-TD timestamp (1 min after first TD)
+        # Use real first TD timestamp and calculate post-TD timestamp (1 min after)
+        first_td_timestamp = game.get('first_td_real_timestamp')
+        if pd.notna(first_td_timestamp):
             try:
                 first_td_dt = pd.to_datetime(first_td_timestamp)
                 post_td_dt = first_td_dt + timedelta(minutes=1)
                 post_td_timestamp = post_td_dt.isoformat()
-            except:
-                post_td_timestamp = f"202{game['season'] % 10}-09-15T13:31:00Z"
+            except Exception as e:
+                print(f"    ⚠️  Error parsing first TD time: {e}")
+                post_td_timestamp = None
         else:
-            first_td_timestamp = f"202{game['season'] % 10}-09-15T13:30:00Z"
-            post_td_timestamp = f"202{game['season'] % 10}-09-15T13:31:00Z"
+            post_td_timestamp = None
+        
+        # Skip if timestamps are not available
+        if not pregame_timestamp or not post_td_timestamp:
+            print(f"    ⚠️  Skipping - missing timestamps")
+            continue
         
         # Search for markets for this game
         home_team = game['home_team']
         away_team = game['away_team']
-        game_date = f"202{game['season'] % 10}-09-15"  # Mock date format
+        game_date = game['game_date']
         
         # Try to find real markets
         markets = api.search_nfl_markets(game_date, home_team, away_team)
-        ticker = f"REAL-{game['game_id']}" if markets else f"MOCK-{game['game_id']}"
+        
+        if not markets:
+            print(f"    ⚠️  No markets found for {away_team} @ {home_team}")
+            continue
+        
+        ticker = markets[0].get('ticker', f"UNKNOWN-{game['game_id']}")
         
         # Get market snapshots at specific times
-        pregame_snapshot = None
-        post_td_snapshot = None
+        print(f"    Fetching data for market: {ticker}")
         
-        if api.authenticated and markets:
-            # Try to get real market data
-            for market in markets:
-                market_ticker = market.get('ticker', '')
-                if market_ticker:
-                    print(f"    Fetching data for market: {market_ticker}")
-                    # Get pregame snapshot (5 min before kickoff)
-                    pregame_snapshot = api.get_market_snapshot(market_ticker, pregame_timestamp)
-                    
-                    # Get post-TD snapshot (1 min after first TD)
-                    post_td_snapshot = api.get_market_snapshot(market_ticker, post_td_timestamp)
-                    
-                    if pregame_snapshot and post_td_snapshot:
-                        print(f"    ✅ Successfully fetched real market data for {market_ticker}")
-                        break
-                    else:
-                        print(f"    ⚠️  Failed to fetch market data for {market_ticker}")
-        else:
-            print(f"    ⚠️  No markets found or API not authenticated for {home_team} vs {away_team}")
+        # Get pregame snapshot (5 min before kickoff)
+        pregame_snapshot = api.get_market_snapshot(ticker, pregame_timestamp)
         
-        # Create data record only if we have real market data
-        if pregame_snapshot and post_td_snapshot:
-            # Real data only
-            kalshi_data.append({
+        # Get post-TD snapshot (1 min after first TD)
+        post_td_snapshot = api.get_market_snapshot(ticker, post_td_timestamp)
+        
+        if not pregame_snapshot or not post_td_snapshot:
+            print(f"    ⚠️  Failed to fetch market snapshots")
+            continue
+        
+        print(f"    ✅ Successfully fetched real market data")
+        
+        # Create data record with real market data
+        kalshi_data.append({
             'game_id': game['game_id'],
+            'season': game['season'],
+            'week': game['week'],
+            'home_team': home_team,
+            'away_team': away_team,
+            'game_date': game_date,
             'kalshi_ticker': ticker,
-                'pregame_timestamp': pregame_timestamp,
-                'pregame_home_prob_kalshi': pregame_snapshot.get('yes_probability', 0.5),
-                'pregame_away_prob_kalshi': pregame_snapshot.get('no_probability', 0.5),
-                'first_td_timestamp': first_td_timestamp,
-                'first_td_team': game['first_td_team'] if pd.notna(game['first_td_team']) else 'UNKNOWN',
-                'post_td_timestamp': post_td_timestamp,
-                'post_td_home_prob_kalshi': post_td_snapshot.get('yes_probability', 0.5),
-                'post_td_away_prob_kalshi': post_td_snapshot.get('no_probability', 0.5),
-                'prob_change_home': post_td_snapshot.get('yes_probability', 0.5) - pregame_snapshot.get('yes_probability', 0.5),
-                'prob_change_away': post_td_snapshot.get('no_probability', 0.5) - pregame_snapshot.get('no_probability', 0.5),
-                'data_quality_flag': 'real_data'
-            })
-        else:
-            # Skip games without real market data
-            print(f"    ⚠️  Skipping {home_team} vs {away_team} - no real market data available")
-        
-        count += 1
+            'pregame_timestamp': pregame_timestamp,
+            'pregame_home_prob_kalshi': pregame_snapshot.get('yes_probability', 0.5),
+            'pregame_away_prob_kalshi': pregame_snapshot.get('no_probability', 0.5),
+            'first_td_timestamp': first_td_timestamp,
+            'first_td_team': game.get('first_td_team') if pd.notna(game.get('first_td_team')) else 'UNKNOWN',
+            'post_td_timestamp': post_td_timestamp,
+            'post_td_home_prob_kalshi': post_td_snapshot.get('yes_probability', 0.5),
+            'post_td_away_prob_kalshi': post_td_snapshot.get('no_probability', 0.5),
+            'prob_change_home': post_td_snapshot.get('yes_probability', 0.5) - pregame_snapshot.get('yes_probability', 0.5),
+            'prob_change_away': post_td_snapshot.get('no_probability', 0.5) - pregame_snapshot.get('no_probability', 0.5),
+            'data_quality_flag': 'real_data'
+        })
     
     print(f"Created {len(kalshi_data)} records with real timing")
     return pd.DataFrame(kalshi_data)
@@ -651,7 +652,7 @@ def main():
         print("   This script only works with real Kalshi API data - no mock data.")
         return
     
-        api = KalshiAPIOfficial(api_key=KALSHI_API_KEY, private_key=KALSHI_PRIVATE_KEY)
+    api = KalshiAPIOfficial(api_key=KALSHI_API_KEY, private_key=KALSHI_PRIVATE_KEY)
     
     # Load NFL data
     nfl_df = load_nfl_data()
@@ -685,8 +686,16 @@ def main():
     if len(kalshi_df) > 0:
         real_data_count = len(kalshi_df[kalshi_df['data_quality_flag'] == 'real_data'])
         print(f"Real data: {real_data_count}")
-        print(f"Games processed: {len(kalshi_df)} out of 50 attempted")
-        print(f"Success rate: {len(kalshi_df)/50*100:.1f}%")
+        
+        # Get the total games attempted from timestamps
+        timestamps_df = load_real_timestamps()
+        total_attempted = len(timestamps_df) if timestamps_df is not None else 0
+        
+        if total_attempted > 0:
+            print(f"Games processed: {len(kalshi_df)} out of {total_attempted} attempted")
+            print(f"Success rate: {len(kalshi_df)/total_attempted*100:.1f}%")
+        else:
+            print(f"Games processed: {len(kalshi_df)}")
     else:
         print("No data retrieved - check API credentials and network connection")
         print("Success rate: 0.0%")
